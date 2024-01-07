@@ -25,13 +25,13 @@
 
 %define BALL_WIDTH 16
 %define BALL_HEIGHT 16
-%define BALL_VELOCITY 6
+%define BALL_VELOCITY 2
 %define BALL_COLOR COLOR_YELLOW
 
 %define BAR_INITIAL_Y 50
 %define BAR_HEIGHT 3
 %define BAR_COLOR COLOR_LIGHTBLUE
-%define BAR_VELOCITY 10
+%define BAR_VELOCITY 3
 
 %define VGA_OFFSET 0xA000
 
@@ -63,6 +63,27 @@ entry:
     mov si, initial_game_state
     mov di, game_state
     rep movsb
+
+    ;; reprogramming channel 0 of PIT to get 60 fps rendering
+    ;; for reference https://wiki.osdev.org/Programmable_Interval_Timer
+    ;; reload value = 1193182 Hz / 60 Hz = 19886 = 0x4DAE
+
+    ;; writing 0b00110100 to I/O-port 0x43 (PIT command register)
+    ;;           00...... channel 0
+    ;;           ..11.... access mode: lobyte/hibyte
+    ;;           ....010. mode 2 (rate generator)
+    ;;           .......0 16-bit binary mode
+    ;; then writing the reload value 0x4DAE to I/O-port 0x40 (channel 0 data port)
+    ;; in two steps (low byte, then high byte)
+
+    cli
+    mov al, 0b00110100
+    out 0x43, al
+    mov al, 0xAE
+    out 0x40, al
+    mov al, 0x4D
+    out 0x40, al
+    sti
 
     mov dword [0x0070], draw_frame
 .loop:
@@ -101,7 +122,6 @@ draw_frame:
     pusha
 
     xor ax, ax
-    mov ds, ax
 
     mov es, ax
     mov ah, 0x13
@@ -208,15 +228,14 @@ running_state:
     mov word [game_state + GameState.ball_dy], 0
     ;; Fall through
 .score_point:
-    mov si, SCORE_DIGIT_COUNT
+    mov di, game_state + GameState.score_sign + SCORE_DIGIT_COUNT - 1
 .loop:
-    inc byte [game_state + GameState.score_sign + si - 1]
-    cmp byte [game_state + GameState.score_sign + si - 1], '9'
+    inc byte [di]
+    cmp byte [di], '9'
     jle .end
-    mov byte [game_state + GameState.score_sign + si - 1], '0'
-    dec si
-    jz .end
-    jmp .loop
+    mov byte [di], '0'
+    dec di
+    jnz .loop
 .end:
 
     cmp word [game_state + GameState.bar_len], 20
